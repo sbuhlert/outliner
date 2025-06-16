@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Outliner</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 1em;
+      background-color: #f9f9f9;
+    }
+    .toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5em;
+      margin-bottom: 1em;
+    }
+    .toolbar button {
+      width: 100%;
+      padding: 0.75em;
+      font-size: 1em;
+      text-align: center;
+      color: white;
+      background-color: #007bff;
+      border: none;
+      border-radius: 4px;
+    }
+    ul {
+      list-style: none;
+      padding-left: 0;
+    }
+    li {
+      margin: 4px 0;
+      padding: 0.5em;
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      cursor: pointer;
+    }
+    li.selected {
+      background-color: #d0ebff;
+    }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: monospace;
+      margin-top: 1em;
+      height: 150px;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button onclick="addItem()">➕ Add</button>
+    <button onclick="deleteItem()">🗑️ Delete</button>
+    <button onclick="editItem()">✏️ Edit</button>
+    <button onclick="indentItem()">➡️ Indent</button>
+    <button onclick="outdentItem()">⬅️ Outdent</button>
+    <button onclick="copyItem()">📋 Copy</button>
+    <button onclick="pasteItem()">📥 Paste</button>
+    <button onclick="exportMarkdown()">💾 Save Local</button>
+    <button onclick="importMarkdown()">📥 Load Local</button>
+    <button onclick="saveToWebDAV()">☁️ Save to WebDAV</button>
+    <button onclick="loadFromWebDAV()">☁️ Load from WebDAV</button>
+  </div>
+  <ul id="tree"></ul>
+  <textarea id="mdArea" style="display:none;"></textarea>
+
+  <script>
+    const WEBDAV_URL = "https://sofastation.synology.me:5006/WebDAV/outliner/outline.md";
+    const WEBDAV_USER = "s.buhlert";
+    const WEBDAV_PASS = "Kelpkelp2-S";
+
+    let selected = null;
+    let clipboard = null;
+
+    function createItem(text = 'New Item', level = 0) {
+      const li = document.createElement('li');
+      li.textContent = text;
+      li.dataset.level = level;
+      li.style.marginLeft = `${level}em`;
+      li.onclick = (e) => {
+        e.stopPropagation();
+        if (selected) selected.classList.remove('selected');
+        selected = li;
+        li.classList.add('selected');
+      };
+      return li;
+    }
+
+    function addItem() {
+      const tree = document.getElementById('tree');
+      const li = createItem('New Item', selected ? parseInt(selected.dataset.level) : 0);
+      if (selected) selected.insertAdjacentElement('afterend', li);
+      else tree.appendChild(li);
+    }
+
+    function deleteItem() {
+      if (selected) selected.remove(), selected = null;
+    }
+
+    function editItem() {
+      if (!selected) return;
+      const newText = prompt("Edit item:", selected.textContent);
+      if (newText !== null) selected.textContent = newText;
+    }
+
+    function indentItem() {
+      if (!selected) return;
+      let lvl = parseInt(selected.dataset.level);
+      if (lvl < 4) selected.dataset.level = ++lvl, selected.style.marginLeft = `${lvl}em`;
+    }
+
+    function outdentItem() {
+      if (!selected) return;
+      let lvl = parseInt(selected.dataset.level);
+      if (lvl > 0) selected.dataset.level = --lvl, selected.style.marginLeft = `${lvl}em`;
+    }
+
+    function copyItem() {
+      if (selected) clipboard = serializeItem(selected);
+    }
+
+    function pasteItem() {
+      if (!clipboard) return;
+      const li = deserializeItem(clipboard);
+      (selected || document.getElementById('tree')).appendChild(li);
+    }
+
+    function serializeItem(item) {
+      return { text: item.textContent, level: item.dataset.level };
+    }
+
+    function deserializeItem(data) {
+      return createItem(data.text, parseInt(data.level));
+    }
+
+    function exportMarkdown() {
+      const lines = [];
+      document.querySelectorAll('#tree > li').forEach(li => {
+        lines.push('#'.repeat(parseInt(li.dataset.level) + 1) + ' ' + li.textContent);
+      });
+      const blob = new Blob([lines.join('\n')], {type: 'text/markdown'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'outline.md';
+      a.click();
+    }
+
+    function importMarkdown() {
+      const area = document.getElementById('mdArea');
+      area.style.display = 'block';
+      area.value = '';
+      const btn = document.createElement('button');
+      btn.textContent = 'Load';
+      btn.onclick = () => {
+        const lines = area.value.split('\n');
+        const tree = document.getElementById('tree');
+        tree.innerHTML = '';
+        lines.forEach(line => {
+          const m = line.match(/^(#+)\s+(.*)$/);
+          if (m) tree.appendChild(createItem(m[2], Math.min(4, m[1].length - 1)));
+        });
+        area.style.display = 'none';
+        btn.remove();
+      };
+      document.body.appendChild(btn);
+    }
+
+    async function saveToWebDAV() {
+      const lines = [];
+      document.querySelectorAll('#tree > li').forEach(li => {
+        lines.push('#'.repeat(parseInt(li.dataset.level) + 1) + ' ' + li.textContent);
+      });
+      const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+      const arrayBuffer = await blob.arrayBuffer();
+      fetch(WEBDAV_URL, {
+        method: "PUT",
+        headers: {
+          'Authorization': 'Basic ' + btoa(WEBDAV_USER + ':' + WEBDAV_PASS),
+        },
+        body: arrayBuffer
+      }).then(r => {
+        alert(r.ok ? 'Saved to WebDAV!' : 'Save failed: ' + r.status);
+      });
+    }
+
+    async function loadFromWebDAV() {
+      fetch(WEBDAV_URL, {
+        headers: {
+          'Authorization': 'Basic ' + btoa(WEBDAV_USER + ':' + WEBDAV_PASS),
+        }
+      }).then(r => r.text()).then(text => {
+        const tree = document.getElementById('tree');
+        tree.innerHTML = '';
+        text.split('\n').forEach(line => {
+          const m = line.match(/^(#+)\s+(.*)$/);
+          if (m) tree.appendChild(createItem(m[2], Math.min(4, m[1].length - 1)));
+        });
+      }).catch(e => alert('Load failed: ' + e));
+    }
+  </script>
+</body>
+</html>
