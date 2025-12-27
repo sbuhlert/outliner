@@ -292,3 +292,4 @@ class OutlinerApp:
 if __name__ == "__main__":
     root = tk.Tk()
     app = OutlinerApp(root)
+    root.mainloop()
